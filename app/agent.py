@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import time
 from dataclasses import dataclass
+from contextlib import nullcontext
 
 from . import metrics
 from .mock_llm import FakeLLM
@@ -24,7 +25,7 @@ class AgentResult:
 
 
 class LabAgent:
-    def __init__(self, model: str = "claude-sonnet-4-5") -> None:
+    def __init__(self, model: str = "gpt-9-astra") -> None:
         self.model = model
         self.llm = FakeLLM(model=model)
 
@@ -51,7 +52,22 @@ class LabAgent:
             },
         ):
             started = time.perf_counter()
-            docs = retrieve(message)
+            start_obs = getattr(langfuse_client, "start_as_current_observation", None)
+
+            with (
+                start_obs(name="retrieval", as_type="retriever")
+                if callable(start_obs)
+                else nullcontext()
+            ) as retrieval:
+                docs = retrieve(message)
+                if retrieval is not None:
+                    retrieval.update(
+                        metadata={
+                            "doc_count": len(docs),
+                            "query_preview": summarize_text(message),
+                        }
+                    )
+
             prompt = resolve_prompt(
                 langfuse_client,
                 feature=feature,
@@ -71,13 +87,39 @@ class LabAgent:
                 },
                 version=prompt.version,
             )
-            # TODO (CP2): instrument retrieve() and FakeLLM.generate() as child
-            # observations. The nested generation must receive prompt, usage and cost.
+
             with propagate_attributes(prompt=prompt.managed_prompt):
-                response = self.llm.generate(prompt.text)
+                with (
+                    start_obs(
+                        name="generation",
+                        as_type="generation",
+                        model=self.model,
+                    )
+                    if callable(start_obs)
+                    else nullcontext()
+                ) as generation:
+                    response = self.llm.generate(prompt.text)
+                    cost_usd = self._estimate_cost(
+                        response.usage.input_tokens,
+                        response.usage.output_tokens,
+                    )
+                    if generation is not None:
+                        generation.update(
+                            usage_details={
+                                "input": response.usage.input_tokens,
+                                "output": response.usage.output_tokens,
+                            },
+                            cost_details={"total": cost_usd},
+                            metadata={
+                                "prompt_name": prompt.name,
+                                "prompt_label": prompt.label,
+                                "prompt_version": prompt.version,
+                                "answer_preview": summarize_text(response.text),
+                            },
+                        )
+
             quality_score = self._heuristic_quality(message, response.text, docs)
             latency_ms = int((time.perf_counter() - started) * 1000)
-            cost_usd = self._estimate_cost(response.usage.input_tokens, response.usage.output_tokens)
 
         metrics.record_request(
             latency_ms=latency_ms,

@@ -140,7 +140,7 @@ Chạy baseline ở terminal thứ hai:
 python scripts/load_test.py
 python scripts/validate_logs.py
 python scripts/validate_dashboard.py
-python -m pytest -q
+python scripts/load_test.py
 ```
 
 Baseline log chưa đạt là bình thường vì các `TODO` của CP1 chưa được làm. Ghi lại kết quả baseline vào `submission/REPORT.md` trước khi sửa.

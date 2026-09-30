@@ -39,7 +39,7 @@ def load_challenge(path: str | Path = "config/challenge.json") -> ChallengeConfi
         )
 
     try:
-        payload = json.loads(challenge_path.read_text(encoding="utf-8"))
+        payload = json.loads(challenge_path.read_text(encoding="utf-8-sig"))
     except json.JSONDecodeError as exc:
         raise ValueError("challenge.json không phải JSON hợp lệ") from exc
 
